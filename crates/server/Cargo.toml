@@ -14,10 +14,12 @@ anyhow = "1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 getrandom = "0.4"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 rmcp = { version = "3.7", features = ["server", "transport-streamable-http-server", "macros"] }
 rusqlite = { version = "0.41", features = ["bundled"] }
 sha2 = "0.11"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v7"] }

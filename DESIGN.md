@@ -459,6 +459,18 @@ Each slice is usable on its own.
     `IF NOT EXISTS`, so a database created then (version 0) adopts it as a
     no-op and moves to version 1.
   - A database newer than the binary is refused, never touched.
+- **D13** Metrics are Prometheus, pulled from `sm-server`.
+  - `GET /metrics` has its own listener, `--metrics-bind` (default
+    `127.0.0.1:9477`), with no token. It is outside the authed router, so
+    metrics never reach the tailnet by accident.
+  - Labels take bounded values only: route templates, method, status, tool,
+    outcome, scope, state. Never ids, users, devices, repos, paths, query text
+    or memory text.
+  - The database gauges are read at scrape time. Nothing about metrics is
+    stored in the database.
+  - The short-lived `sm-hook` cannot be scraped. It will report each run to
+    the server, which turns the report into metrics, so every metric is on
+    one endpoint. Not built yet.
 
 ## 16. Open questions
 

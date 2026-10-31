@@ -33,7 +33,7 @@ Logs go to stderr. By default you get startup, migrations, warnings and
 errors. Set `RUST_LOG` for more:
 
 ```sh
-RUST_LOG=sm_server=debug sm-server serve ...   # every request, auth refusal and tool call
+RUST_LOG=sm_server=debug sm-server serve ...   # every routed request, auth refusal and tool call
 RUST_LOG=sm_server=trace sm-server serve ...   # also recall query text and successful auth
 RUST_LOG=debug sm-server serve ...             # also rmcp and axum internals
 ```
@@ -68,6 +68,42 @@ control. Use one of these:
       reverse_proxy 127.0.0.1:8377
   }
   ```
+
+## Metrics
+
+`sm-server serve` also serves Prometheus metrics at `GET /metrics` on a
+second listener, `--metrics-bind`, default `127.0.0.1:9477`. It needs no
+token, so keep it on loopback. It is separate from `--bind`, so metrics never
+reach the tailnet by accident.
+
+`ops/` has a local Prometheus and Grafana:
+
+```sh
+docker compose -f ops/compose.yaml up -d   # with sm-server on the default --metrics-bind
+docker compose -f ops/compose.yaml down    # keeps the data volumes
+```
+
+- Prometheus: <http://127.0.0.1:9090>. It scrapes `host.docker.internal:9477`
+  every 15 s; Status → Targets shows whether the job is up.
+- Grafana: <http://127.0.0.1:3000/d/sharedmem>, user `admin`, password
+  `admin`.
+
+Both bind to loopback. Docker Desktop on macOS reaches the loopback-bound
+metrics port through `host.docker.internal`. Other engines may not; there,
+run Prometheus on the host instead.
+
+Labels and privacy:
+
+- Labels take bounded values only: the route template
+  (`/v1/memories/{id}/anchors`, never the id), method, status, tool, outcome,
+  scope, state and reason. Requests that match no route are not counted.
+- No metric carries an id, user, device, repo, path, query or memory text.
+- The database gauges (memories by scope and state, anchors with and without
+  a baseline, tokens, schema version, file size) are read at scrape time.
+
+Prometheus 3 stores bucket bounds as floats, so the empty-recall bucket is
+`le="0.0"`. The share of recalls that found nothing:
+`rate(sharedmem_recall_results_bucket{le="0.0"}[1h]) / rate(sharedmem_recall_results_count[1h])`.
 
 ## Install the Claude Code plugin
 

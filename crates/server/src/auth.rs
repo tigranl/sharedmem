@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, error, trace};
 
 use crate::store::Store;
+use crate::telemetry;
 
 /// Middleware: 401 without a valid, unrevoked bearer token.
 pub async fn require_token(State(store): State<Store>, mut req: Request, next: Next) -> Response {
@@ -19,6 +20,7 @@ pub async fn require_token(State(store): State<Store>, mut req: Request, next: N
         .and_then(|v| v.strip_prefix("Bearer "));
     let Some(token) = token else {
         debug!(path = %req.uri().path(), "auth: no bearer token");
+        telemetry::record_auth_failure("missing_token");
         return StatusCode::UNAUTHORIZED.into_response();
     };
     // never log the token, not even a prefix
@@ -30,10 +32,12 @@ pub async fn require_token(State(store): State<Store>, mut req: Request, next: N
         }
         Ok(None) => {
             debug!(path = %req.uri().path(), "auth: unknown or revoked token");
+            telemetry::record_auth_failure("unknown_token");
             StatusCode::UNAUTHORIZED.into_response()
         }
         Err(e) => {
             error!(error = %format!("{e:#}"), "auth: token lookup failed");
+            telemetry::record_auth_failure("lookup_error");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

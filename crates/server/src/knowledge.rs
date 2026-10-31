@@ -4,7 +4,7 @@ use serde::Serialize;
 use sm_core::{Current, clean_anchor_path, resolve_scope, staleness};
 use sm_proto::{AnchorBaseline, Memory, Scope, Staleness};
 
-use crate::store::{NewMemory, Principal, Store};
+use crate::store::{NewMemory, Principal, Saved, Store};
 
 /// Why a request failed.
 #[derive(Debug)]
@@ -43,7 +43,7 @@ fn non_empty(s: Option<String>) -> Option<String> {
 }
 
 /// Validates and saves a memory.
-pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Memory, Error> {
+pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Saved, Error> {
     let text = r.text.trim().to_string();
     if text.is_empty() || text.len() > MAX_TEXT {
         return Err(invalid(format!("text must be 1..{MAX_TEXT} bytes")));
