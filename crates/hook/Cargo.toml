@@ -1,0 +1,12 @@
+[package]
+name = "sm-hook"
+description = "Claude Code hook binary for sharedmem. Blocking, no async runtime."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+sm-proto.workspace = true
+sm-core.workspace = true
+serde_json.workspace = true
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }

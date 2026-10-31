@@ -1,0 +1,11 @@
+{
+  "name": "sharedmem",
+  "owner": { "name": "tigran" },
+  "plugins": [
+    {
+      "name": "sharedmem",
+      "source": "./plugin",
+      "description": "One Claude Code memory across your machines"
+    }
+  ]
+}

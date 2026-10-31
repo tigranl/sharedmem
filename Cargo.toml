@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/proto", "crates/core", "crates/hook", "crates/server"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "Apache-2.0 OR MIT"
+
+[workspace.dependencies]
+sm-proto = { path = "crates/proto" }
+sm-core = { path = "crates/core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

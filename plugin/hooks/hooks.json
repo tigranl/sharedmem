@@ -1,0 +1,20 @@
+{
+  "description": "sharedmem: inject memories at session start; record anchor baselines after remember",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sm-hook session-start", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*sharedmem.*__remember",
+        "hooks": [
+          { "type": "command", "command": "sm-hook remembered", "async": true }
+        ]
+      }
+    ]
+  }
+}

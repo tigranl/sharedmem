@@ -1,0 +1,9 @@
+[package]
+name = "sm-proto"
+description = "Wire types shared by sm-hook and sm-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true

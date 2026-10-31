@@ -1,0 +1,10 @@
+[package]
+name = "sm-core"
+description = "Pure sharedmem logic: repo ids, content hashes, staleness. No IO."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+sm-proto.workspace = true
+sha1 = "0.11"

@@ -1,0 +1,20 @@
+{
+  "name": "sharedmem",
+  "version": "0.1.0",
+  "description": "One Claude Code memory across your machines, with each fact checked against the code it describes.",
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Server URL",
+      "description": "sm-server base URL, e.g. http://desktop.your-tailnet.ts.net:8377 or https://sharedmem.example.com",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Device token",
+      "description": "Printed by `sm-server token add` for this machine",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}
