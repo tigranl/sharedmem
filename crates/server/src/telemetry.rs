@@ -15,7 +15,7 @@ use axum::extract::{MatchedPath, State};
 use axum::http::{Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use metrics::{counter, gauge, histogram};
+use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{BuildError, Matcher, PrometheusBuilder, PrometheusHandle};
 use tracing::error;
 
@@ -37,6 +37,105 @@ const TOKENS: &str = "sharedmem_tokens";
 const DB_SIZE: &str = "sharedmem_db_size_bytes";
 const SCHEMA_VERSION: &str = "sharedmem_schema_version";
 const BUILD_INFO: &str = "sharedmem_build_info";
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Counter,
+    Gauge,
+    Histogram,
+}
+
+/// One metric's `# HELP` text.
+struct Doc {
+    name: &'static str,
+    kind: Kind,
+    help: &'static str,
+}
+
+/// Every metric. [`install`] registers these as `# HELP` lines, and a test
+/// checks that the README's metrics table lists exactly these names.
+const DOCS: [Doc; 16] = [
+    Doc {
+        name: HTTP_REQUESTS,
+        kind: Kind::Counter,
+        help: "Requests that matched a route, by route template, method and status.",
+    },
+    Doc {
+        name: HTTP_REQUEST_DURATION,
+        kind: Kind::Histogram,
+        help: "Time to serve a request that matched a route.",
+    },
+    Doc {
+        name: AUTH_FAILURES,
+        kind: Kind::Counter,
+        help: "Requests refused by the bearer-token check, by reason.",
+    },
+    Doc {
+        name: TOOL_CALLS,
+        kind: Kind::Counter,
+        help: "MCP tool calls by tool and outcome: ok, invalid input, or server error.",
+    },
+    Doc {
+        name: TOOL_DURATION,
+        kind: Kind::Histogram,
+        help: "Time per MCP tool call.",
+    },
+    Doc {
+        name: RECALL_RESULTS,
+        kind: Kind::Histogram,
+        help: "Memories returned by each successful recall; the le=0 bucket counts empty ones.",
+    },
+    Doc {
+        name: MEMORIES_SAVED,
+        kind: Kind::Counter,
+        help: "Memories saved with remember, by scope.",
+    },
+    Doc {
+        name: MEMORIES_SUPERSEDED,
+        kind: Kind::Counter,
+        help: "Saves whose key replaced an older memory.",
+    },
+    Doc {
+        name: ANCHOR_BASELINES,
+        kind: Kind::Counter,
+        help: "Anchor-baseline posts from the hook after remember, by outcome.",
+    },
+    Doc {
+        name: CONTEXT_MEMORIES,
+        kind: Kind::Histogram,
+        help: "Memories returned for a session start, before the hook trims them to its budget.",
+    },
+    Doc {
+        name: MEMORIES,
+        kind: Kind::Gauge,
+        help: "Memories in the database by scope and state, read at scrape time.",
+    },
+    Doc {
+        name: ANCHORS,
+        kind: Kind::Gauge,
+        help: "Anchors with and without a recorded baseline; missing means the post-save hook never reported.",
+    },
+    Doc {
+        name: TOKENS,
+        kind: Kind::Gauge,
+        help: "Device tokens by state.",
+    },
+    Doc {
+        name: DB_SIZE,
+        kind: Kind::Gauge,
+        help: "Size of the database file plus its WAL.",
+    },
+    Doc {
+        name: SCHEMA_VERSION,
+        kind: Kind::Gauge,
+        help: "Applied schema migration (PRAGMA user_version).",
+    },
+    Doc {
+        name: BUILD_INFO,
+        kind: Kind::Gauge,
+        help: "Always 1; the version label is the running sm-server version.",
+    },
+];
 
 /// Seconds, 1 ms to 2.5 s.
 const LATENCY_BUCKETS: [f64; 11] = [
@@ -60,8 +159,21 @@ pub fn install() -> Result<PrometheusHandle, BuildError> {
         builder = builder.set_buckets_for_metric(Matcher::Full(name.to_owned()), &COUNT_BUCKETS)?;
     }
     let handle = builder.install_recorder()?;
+    describe();
     gauge!(BUILD_INFO, "version" => env!("CARGO_PKG_VERSION")).set(1.0);
     Ok(handle)
+}
+
+/// Registers [`DOCS`] with the installed recorder. A metric's `# HELP` line
+/// appears once the metric has a series.
+fn describe() {
+    for doc in &DOCS {
+        match doc.kind {
+            Kind::Counter => describe_counter!(doc.name, doc.help),
+            Kind::Gauge => describe_gauge!(doc.name, doc.help),
+            Kind::Histogram => describe_histogram!(doc.name, doc.help),
+        }
+    }
 }
 
 /// Runs forever. `install_recorder` leaves upkeep to the caller; without it,
@@ -183,4 +295,44 @@ pub fn record_anchor_baselines(outcome: &'static str) {
 /// How many memories `GET /v1/context` returned, before the hook truncates them.
 pub fn record_context_memories(count: usize) {
     histogram!(CONTEXT_MEMORIES).record(count as f64);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const README: &str = include_str!("../../../README.md");
+
+    /// Names in the README's metrics table: the first cell of rows that start
+    /// with a metric name.
+    fn readme_metrics() -> Vec<&'static str> {
+        README
+            .lines()
+            .filter(|line| line.starts_with("| `sharedmem_"))
+            .filter_map(|line| line.split('`').nth(1))
+            .collect()
+    }
+
+    #[test]
+    fn readme_table_lists_exactly_the_metrics() {
+        let documented = readme_metrics();
+        for doc in &DOCS {
+            assert!(
+                documented.contains(&doc.name),
+                "{} is missing from the README metrics table",
+                doc.name
+            );
+        }
+        for name in &documented {
+            assert!(
+                DOCS.iter().any(|doc| doc.name == *name),
+                "the README documents {name}, which telemetry.rs doesn't define"
+            );
+        }
+        assert_eq!(
+            documented.len(),
+            DOCS.len(),
+            "a metric is listed twice in the README"
+        );
+    }
 }

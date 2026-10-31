@@ -348,6 +348,21 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
     let version = format!(r#"version="{}""#, env!("CARGO_PKG_VERSION"));
     assert_value(&text, "sharedmem_build_info", &[&version], 1.0);
 
+    // every exported metric carries its description
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("# TYPE ") else {
+            continue;
+        };
+        let name = rest
+            .split(' ')
+            .next()
+            .expect("a # TYPE line names its metric");
+        assert!(
+            text.contains(&format!("# HELP {name} ")),
+            "{name} has no # HELP line"
+        );
+    }
+
     // nothing identifying, at any label
     assert!(!has_uuid(&text), "a uuid leaked into the metrics:\n{text}");
     for secret in [
