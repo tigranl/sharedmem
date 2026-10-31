@@ -9,6 +9,7 @@ use sm_proto::{AnchorBaseline, PathBlob};
 
 use crate::{Result, api::Api, git};
 
+/// Posts the anchors' baselines; does nothing for a memory without anchors.
 pub fn run(input: &Value, api: &Api) -> Result<()> {
     let anchors: Vec<&str> = input["tool_input"]["anchors"]
         .as_array()

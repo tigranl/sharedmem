@@ -8,14 +8,12 @@ use anyhow::{Context as _, bail};
 use rusqlite::{Connection, TransactionBehavior};
 
 /// `(file name, SQL)` in order; applying the Nth sets `user_version` to N.
-pub(super) const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_init.sql",
-    include_str!("../../migrations/0001_init.sql"),
-)];
+pub(crate) const MIGRATIONS: &[(&str, &str)] =
+    &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
 
 /// Applies the pending migrations, each in one transaction with its version
 /// bump. An existing database is first copied to `<db>.bak-v<version>`.
-pub(super) fn run(
+pub(crate) fn run(
     conn: &mut Connection,
     db: &Path,
     migrations: &[(&str, &str)],

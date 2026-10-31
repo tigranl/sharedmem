@@ -10,6 +10,7 @@ use tracing::{debug, error, trace};
 
 use crate::store::Store;
 
+/// Middleware: 401 without a valid, unrevoked bearer token.
 pub async fn require_token(State(store): State<Store>, mut req: Request, next: Next) -> Response {
     let token = req
         .headers()

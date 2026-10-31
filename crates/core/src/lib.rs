@@ -48,11 +48,14 @@ pub fn content_hash(bytes: &[u8]) -> String {
 /// What the caller knows about an anchored file right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Current<'a> {
+    /// The file exists and hashes to this blob.
     Blob(&'a str),
     Missing,
+    /// The file could not be checked, e.g. no checkout of its repo here.
     Unknown,
 }
 
+/// Compares an anchor's baseline with what the file is now.
 pub fn staleness(anchor: &Anchor, current: Current) -> Staleness {
     let Some(saved) = anchor.blob_at_save.as_deref() else {
         return Staleness::Unknown; // no baseline yet

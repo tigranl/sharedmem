@@ -7,10 +7,17 @@ mod git;
 mod remembered;
 mod session_start;
 
+use std::error::Error;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+use serde_json::Value;
+
+use crate::api::Api;
+
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 fn main() {
     let event = std::env::args().nth(1).unwrap_or_default();
@@ -40,8 +47,8 @@ fn main() {
 fn run(event: &str, network: Duration) -> Result<Option<String>> {
     let mut stdin = String::new();
     std::io::stdin().read_to_string(&mut stdin)?;
-    let input: serde_json::Value = serde_json::from_str(&stdin)?;
-    let api = api::Api::from_env(network)?;
+    let input: Value = serde_json::from_str(&stdin)?;
+    let api = Api::from_env(network)?;
     match event {
         "session-start" => session_start::run(&input, &api).map(Some),
         "remembered" => remembered::run(&input, &api).map(|()| None),
@@ -53,12 +60,12 @@ fn log(msg: &str) {
     let Some(home) = std::env::var_os("HOME") else {
         return;
     };
-    let dir = std::path::Path::new(&home).join(".local/state/sharedmem");
+    let dir = Path::new(&home).join(".local/state/sharedmem");
     let _ = std::fs::create_dir_all(&dir);
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    if let Ok(mut f) = std::fs::OpenOptions::new()
+    if let Ok(mut f) = OpenOptions::new()
         .create(true)
         .append(true)
         .open(dir.join("hook.log"))

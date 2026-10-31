@@ -1,7 +1,10 @@
 //! Wire types shared by `sm-hook` and `sm-server`.
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
+/// Who a memory is for: one repo, or the user everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
@@ -10,28 +13,36 @@ pub enum Scope {
 }
 
 impl Scope {
+    /// The lowercase name used on the wire and in the database.
     pub fn as_str(self) -> &'static str {
         match self {
             Scope::Personal => "personal",
             Scope::Repo => "repo",
         }
     }
+}
 
-    pub fn parse(s: &str) -> Option<Scope> {
+impl FromStr for Scope {
+    /// A message for the caller.
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Scope, String> {
         match s {
-            "personal" => Some(Scope::Personal),
-            "repo" => Some(Scope::Repo),
-            _ => None,
+            "personal" => Ok(Scope::Personal),
+            "repo" => Ok(Scope::Repo),
+            _ => Err("scope must be \"repo\" or \"personal\"".into()),
         }
     }
 }
 
+/// Whether an anchored file still matches its baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Staleness {
     Fresh,
     Changed,
     Deleted,
+    /// No baseline, or the file could not be checked.
     Unknown,
 }
 
@@ -40,15 +51,19 @@ pub enum Staleness {
 pub struct Anchor {
     /// Repo-relative path.
     pub path: String,
+    /// Git blob hash of the file when the memory was saved.
     pub blob_at_save: Option<String>,
+    /// HEAD when the memory was saved.
     pub commit_at_save: Option<String>,
 }
 
+/// One saved fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
     pub scope: Scope,
     pub repo: Option<String>,
+    /// Saving again with the same key replaces this memory.
     pub key: Option<String>,
     pub text: String,
     /// Unix milliseconds.
@@ -70,6 +85,7 @@ pub struct AnchorBaseline {
     pub blobs: Vec<PathBlob>,
 }
 
+/// A repo-relative path and its git blob hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathBlob {
     pub path: String,

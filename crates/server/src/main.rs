@@ -1,8 +1,12 @@
+//! `sm-server serve` runs the server; `sm-server token add` issues a token.
+
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use sm_server::{auth, http, store::Store};
+use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -53,12 +57,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_writer(std::io::stderr)
         // colours only on a terminal, so log files stay plain text
-        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
     match Cli::parse().cmd {
         Cmd::Serve { db, bind } => {
             let store = Store::open(&db)?;
-            let listener = tokio::net::TcpListener::bind(bind).await?;
+            let listener = TcpListener::bind(bind).await?;
             info!(addr = %listener.local_addr()?, db = %db.display(), "listening");
             axum::serve(listener, http::router(store))
                 .with_graceful_shutdown(async {

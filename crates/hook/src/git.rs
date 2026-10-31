@@ -16,6 +16,7 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
     (out.status.success() && !s.is_empty()).then_some(s)
 }
 
+/// Root of the work tree containing `cwd`.
 pub fn toplevel(cwd: &Path) -> Option<PathBuf> {
     git(cwd, &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
 }

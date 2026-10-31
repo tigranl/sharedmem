@@ -17,6 +17,7 @@ use crate::knowledge::{self, Error};
 use crate::store::{Principal, Store};
 use crate::{auth, context, mcp::Mcp};
 
+/// All routes: `/healthz`, `/v1/...` and `/mcp`.
 pub fn router(store: Store) -> Router {
     let mcp_store = store.clone();
     let mcp = StreamableHttpService::new(

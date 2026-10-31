@@ -1,16 +1,18 @@
-//! All SQL lives here. One writer thread owns the only write connection and
+//! All SQL lives here and in `migrate`. One writer thread owns the only write connection and
 //! handlers send it work over a channel; reads use a small connection pool.
 //! Every memory query takes the principal: there is no unscoped read path.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use sm_proto::{Anchor, Memory, PathBlob, Scope};
+use uuid::Uuid;
 
-mod migrate;
+use crate::migrate;
 
 /// Who is calling, from their token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +21,7 @@ pub struct Principal {
     pub device: String,
 }
 
+/// A memory to save; the store assigns its id and time.
 pub struct NewMemory {
     pub scope: Scope,
     pub repo: Option<String>,
@@ -31,6 +34,7 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
 const MAX_IDLE_READERS: usize = 4;
 
+/// Handle to the database; cheap to clone.
 #[derive(Clone)]
 pub struct Store {
     writer: mpsc::Sender<Job>,
@@ -46,12 +50,13 @@ fn now_ms() -> i64 {
 
 fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.busy_timeout(Duration::from_secs(5))?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     Ok(conn)
 }
 
 impl Store {
+    /// Opens or creates the database and migrates it to the latest schema.
     pub fn open(path: &Path) -> anyhow::Result<Store> {
         let mut conn = open(path).with_context(|| format!("open {}", path.display()))?;
         // memories are primary data: an acknowledged remember must survive a power cut
@@ -60,7 +65,7 @@ impl Store {
         // after migrating, so a refused newer schema is left byte-for-byte untouched
         conn.pragma_update(None, "journal_mode", "WAL")?;
         let (writer, jobs) = mpsc::channel::<Job>();
-        std::thread::Builder::new()
+        thread::Builder::new()
             .name("sm-store-writer".into())
             .spawn(move || {
                 for job in jobs {
@@ -93,7 +98,10 @@ impl Store {
     ) -> anyhow::Result<T> {
         let (readers, path) = (self.readers.clone(), self.path.clone());
         tokio::task::spawn_blocking(move || -> anyhow::Result<T> {
-            let pooled = readers.lock().unwrap().pop();
+            let pooled = readers
+                .lock()
+                .expect("reader pool poisoned: a thread panicked holding it")
+                .pop();
             let conn = match pooled {
                 Some(conn) => conn,
                 None => {
@@ -103,7 +111,9 @@ impl Store {
                 }
             };
             let result = f(&conn);
-            let mut idle = readers.lock().unwrap();
+            let mut idle = readers
+                .lock()
+                .expect("reader pool poisoned: a thread panicked holding it");
             if idle.len() < MAX_IDLE_READERS {
                 idle.push(conn);
             }
@@ -134,6 +144,7 @@ impl Store {
         .await
     }
 
+    /// The owner of an unrevoked token, by the token's hash.
     pub async fn principal(&self, token_hash: &str) -> anyhow::Result<Option<Principal>> {
         let hash = token_hash.to_string();
         self.read(move |conn| {
@@ -156,7 +167,7 @@ impl Store {
     /// the same `(scope, repo, key)`.
     pub async fn insert_memory(&self, p: &Principal, m: NewMemory) -> anyhow::Result<Memory> {
         let memory = Memory {
-            id: uuid::Uuid::now_v7().to_string(),
+            id: Uuid::now_v7().to_string(),
             scope: m.scope,
             repo: m.repo,
             key: m.key,
@@ -302,11 +313,11 @@ impl Store {
     }
 }
 
-fn memory_row(r: &rusqlite::Row) -> rusqlite::Result<Memory> {
+fn memory_row(r: &Row) -> rusqlite::Result<Memory> {
     let scope: String = r.get(1)?;
     Ok(Memory {
         id: r.get(0)?,
-        scope: Scope::parse(&scope).unwrap_or(Scope::Personal),
+        scope: scope.parse().unwrap_or(Scope::Personal),
         repo: r.get(2)?,
         key: r.get(3)?,
         text: r.get(4)?,

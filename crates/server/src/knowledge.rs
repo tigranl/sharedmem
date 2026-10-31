@@ -6,10 +6,12 @@ use sm_proto::{AnchorBaseline, Memory, Scope, Staleness};
 
 use crate::store::{NewMemory, Principal, Store};
 
+/// Why a request failed.
 #[derive(Debug)]
 pub enum Error {
     /// The caller's input is wrong; the message says how.
     Invalid(String),
+    /// A storage failure; logged, never shown to the caller.
     Internal(anyhow::Error),
 }
 
@@ -23,6 +25,7 @@ fn invalid(msg: impl Into<String>) -> Error {
     Error::Invalid(msg.into())
 }
 
+/// A `remember` request as the caller sent it, before validation.
 #[derive(Debug)]
 pub struct Remember {
     pub text: String,
@@ -39,6 +42,7 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// Validates and saves a memory.
 pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Memory, Error> {
     let text = r.text.trim().to_string();
     if text.is_empty() || text.len() > MAX_TEXT {
@@ -71,6 +75,7 @@ pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Memor
     Ok(store.insert_memory(p, new).await?)
 }
 
+/// A recall hit with its anchors' staleness.
 #[derive(Debug, Serialize)]
 pub struct Recalled {
     #[serde(flatten)]
@@ -79,6 +84,7 @@ pub struct Recalled {
     pub staleness: Vec<Staleness>,
 }
 
+/// Searches the caller's memories; `limit` defaults to 10 and is clamped to 1..=50.
 pub async fn recall(
     store: &Store,
     p: &Principal,
@@ -102,6 +108,7 @@ pub async fn recall(
         .collect())
 }
 
+/// Soft-deletes one of the caller's memories. False when there is none with that id.
 pub async fn forget(store: &Store, p: &Principal, id: &str) -> Result<bool, Error> {
     Ok(store.forget(p, id.trim()).await?)
 }

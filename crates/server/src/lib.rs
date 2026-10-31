@@ -5,4 +5,5 @@ pub mod context;
 pub mod http;
 pub mod knowledge;
 pub mod mcp;
+mod migrate;
 pub mod store;

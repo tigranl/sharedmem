@@ -14,11 +14,13 @@ use crate::store::{Principal, Store};
 /// Enough for any budget the hook renders; the hook truncates further.
 const LIMIT: u32 = 100;
 
+/// Query string of `GET /v1/context`.
 #[derive(Deserialize)]
 pub struct Params {
     repo: Option<String>,
 }
 
+/// Handler for `GET /v1/context`; personal memories only without `repo`.
 pub async fn get(
     State(store): State<Store>,
     Extension(p): Extension<Principal>,

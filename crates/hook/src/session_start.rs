@@ -15,6 +15,7 @@ const MAX_CHARS: usize = 6_000;
 /// One long memory must not crowd out the rest.
 const MAX_MEMORY_CHARS: usize = 600;
 
+/// Returns the hook output JSON carrying the context block.
 pub fn run(input: &Value, api: &Api) -> Result<String> {
     let cwd = input["cwd"].as_str().ok_or("no cwd in hook input")?;
     let top = git::toplevel(Path::new(cwd));
@@ -179,9 +180,23 @@ mod tests {
             .collect();
         let checked: Vec<_> = ms.iter().map(|m| (m, vec![])).collect();
         let block = render(None, None, &checked);
-        assert!(block.chars().count() <= MAX_CHARS, "{}", block.len());
-        assert!(block.contains("more; search them with `recall`."));
-        assert!(block.lines().nth(1).unwrap().ends_with('…'));
-        assert!(block.ends_with("replace an older fact."));
+        assert!(
+            block.chars().count() <= MAX_CHARS,
+            "{} chars over budget",
+            block.chars().count()
+        );
+        assert!(
+            block.contains("more; search them with `recall`."),
+            "no \"more\" line: {block}"
+        );
+        let first = block
+            .lines()
+            .nth(1)
+            .expect("a memory line after the header");
+        assert!(first.ends_with('…'), "long memory not cut: {first}");
+        assert!(
+            block.ends_with("replace an older fact."),
+            "footer missing: {block}"
+        );
     }
 }

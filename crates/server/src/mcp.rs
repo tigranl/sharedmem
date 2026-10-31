@@ -10,17 +10,19 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
-use sm_proto::Scope;
+use serde_json::Value;
 use tracing::{debug, error, trace};
 
 use crate::knowledge::{self, Error, Remember};
 use crate::store::{Principal, Store};
 
+/// The MCP server: one per request, since sessions are stateless.
 #[derive(Clone)]
 pub struct Mcp {
     store: Store,
 }
 
+/// Arguments of the `remember` tool.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct RememberArgs {
     /// The fact, in one or two sentences.
@@ -35,6 +37,7 @@ pub struct RememberArgs {
     anchors: Option<Vec<String>>,
 }
 
+/// Arguments of the `recall` tool.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct RecallArgs {
     /// Words to search for.
@@ -45,6 +48,7 @@ pub struct RecallArgs {
     limit: Option<u32>,
 }
 
+/// Arguments of the `forget` tool.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ForgetArgs {
     /// Memory id from remember or recall.
@@ -60,10 +64,7 @@ fn principal(ctx: &RequestContext<RoleServer>) -> Result<Principal, ErrorData> {
         .ok_or_else(|| ErrorData::internal_error("no authenticated principal", None))
 }
 
-fn result(
-    tool: &'static str,
-    r: Result<serde_json::Value, Error>,
-) -> Result<CallToolResult, ErrorData> {
+fn result(tool: &'static str, r: Result<Value, Error>) -> Result<CallToolResult, ErrorData> {
     match r {
         Ok(v) => Ok(CallToolResult::structured(v)),
         Err(Error::Invalid(msg)) => {
@@ -79,6 +80,7 @@ fn result(
 
 #[tool_router]
 impl Mcp {
+    /// An MCP server over `store`.
     pub fn new(store: Store) -> Self {
         Mcp { store }
     }
@@ -101,16 +103,9 @@ impl Mcp {
         );
         let scope = match a.scope.as_deref().map(str::trim) {
             None | Some("") => None,
-            Some(s) => match Scope::parse(s) {
-                Some(scope) => Some(scope),
-                None => {
-                    return result(
-                        "remember",
-                        Err(Error::Invalid(
-                            "scope must be \"repo\" or \"personal\"".into(),
-                        )),
-                    );
-                }
+            Some(s) => match s.parse() {
+                Ok(scope) => Some(scope),
+                Err(msg) => return result("remember", Err(Error::Invalid(msg))),
             },
         };
         let r = Remember {
