@@ -10,6 +10,7 @@ use sm_proto::Context;
 use tracing::{debug, error};
 
 use crate::store::{Principal, Store};
+use crate::telemetry;
 
 /// Enough for any budget the hook renders; the hook truncates further.
 const LIMIT: u32 = 100;
@@ -30,6 +31,7 @@ pub async fn get(
     match store.context(&p, repo.as_deref(), LIMIT).await {
         Ok(memories) => {
             debug!(user = p.user_id, device = %p.device, ?repo, memories = memories.len(), "context");
+            telemetry::record_context_memories(memories.len());
             Ok(Json(Context { memories }))
         }
         Err(e) => {

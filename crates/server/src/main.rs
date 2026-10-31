@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use sm_server::{auth, http, store::Store};
+use sm_server::{auth, http, store::Store, telemetry};
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -26,6 +26,9 @@ enum Cmd {
         /// Keep it on loopback or a tailnet address; tokens must not cross a network in plaintext.
         #[arg(long, default_value = "127.0.0.1:8377")]
         bind: SocketAddr,
+        /// Prometheus `GET /metrics`, served without a token: keep it on loopback.
+        #[arg(long, default_value = "127.0.0.1:9477")]
+        metrics_bind: SocketAddr,
     },
     /// Manage tokens.
     Token {
@@ -60,15 +63,25 @@ async fn main() -> anyhow::Result<()> {
         .with_ansi(std::io::stderr().is_terminal())
         .init();
     match Cli::parse().cmd {
-        Cmd::Serve { db, bind } => {
+        Cmd::Serve {
+            db,
+            bind,
+            metrics_bind,
+        } => {
             let store = Store::open(&db)?;
+            let metrics = telemetry::install()?;
+            tokio::spawn(telemetry::run_upkeep(metrics.clone()));
             let listener = TcpListener::bind(bind).await?;
-            info!(addr = %listener.local_addr()?, db = %db.display(), "listening");
-            axum::serve(listener, http::router(store))
-                .with_graceful_shutdown(async {
-                    let _ = tokio::signal::ctrl_c().await;
-                })
-                .await?;
+            let metrics_listener = TcpListener::bind(metrics_bind).await?;
+            info!(
+                addr = %listener.local_addr()?, metrics = %metrics_listener.local_addr()?,
+                db = %db.display(), "listening"
+            );
+            tokio::try_join!(
+                axum::serve(listener, http::router(store.clone())).with_graceful_shutdown(ctrl_c()),
+                axum::serve(metrics_listener, telemetry::router(metrics, store, db))
+                    .with_graceful_shutdown(ctrl_c()),
+            )?;
         }
         Cmd::Token {
             cmd: TokenCmd::Add { db, user, device },
@@ -83,4 +96,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Every caller is woken by the same Ctrl-C, so both listeners stop together.
+async fn ctrl_c() {
+    let _ = tokio::signal::ctrl_c().await;
 }

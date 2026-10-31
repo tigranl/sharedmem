@@ -30,6 +30,38 @@ pub struct NewMemory {
     pub anchors: Vec<String>,
 }
 
+/// What [`Store::insert_memory`] saved.
+#[derive(Debug)]
+pub struct Saved {
+    pub memory: Memory,
+    /// Its key replaced an older active memory.
+    pub superseded: bool,
+}
+
+/// Row counts for the metrics gauges, from [`Store::stats`].
+#[derive(Debug)]
+pub struct Stats {
+    /// One entry per scope that has any memories.
+    pub memories: Vec<MemoryCounts>,
+    /// Anchors of active memories whose baseline the PostToolUse hook has posted.
+    pub anchors_with_baseline: i64,
+    pub anchors_missing_baseline: i64,
+    pub tokens_active: i64,
+    pub tokens_revoked: i64,
+    /// `PRAGMA user_version`: how many migrations have run.
+    pub schema_version: u32,
+}
+
+/// Memories of one scope by state. A deleted memory counts as deleted even
+/// if it was superseded first.
+#[derive(Debug)]
+pub struct MemoryCounts {
+    pub scope: Scope,
+    pub active: i64,
+    pub superseded: i64,
+    pub deleted: i64,
+}
+
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
 const MAX_IDLE_READERS: usize = 4;
@@ -165,7 +197,7 @@ impl Store {
 
     /// Saves a memory; with a key it supersedes the owner's active memory with
     /// the same `(scope, repo, key)`.
-    pub async fn insert_memory(&self, p: &Principal, m: NewMemory) -> anyhow::Result<Memory> {
+    pub async fn insert_memory(&self, p: &Principal, m: NewMemory) -> anyhow::Result<Saved> {
         let memory = Memory {
             id: Uuid::now_v7().to_string(),
             scope: m.scope,
@@ -187,14 +219,17 @@ impl Store {
         self.write(move |conn| {
             let m = &memory;
             let tx = conn.transaction()?;
-            if let Some(key) = &m.key {
-                tx.execute(
-                    "UPDATE memories SET superseded_by = ?1
-                     WHERE user_id = ?2 AND scope = ?3 AND ifnull(repo, '') = ifnull(?4, '')
-                       AND key = ?5 AND superseded_by IS NULL AND deleted_at IS NULL",
-                    params![m.id, user_id, m.scope.as_str(), m.repo, key],
-                )?;
-            }
+            let superseded = match &m.key {
+                Some(key) => {
+                    tx.execute(
+                        "UPDATE memories SET superseded_by = ?1
+                         WHERE user_id = ?2 AND scope = ?3 AND ifnull(repo, '') = ifnull(?4, '')
+                           AND key = ?5 AND superseded_by IS NULL AND deleted_at IS NULL",
+                        params![m.id, user_id, m.scope.as_str(), m.repo, key],
+                    )? > 0
+                }
+                None => false,
+            };
             tx.execute(
                 "INSERT INTO memories (id, user_id, scope, repo, key, text, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -207,7 +242,7 @@ impl Store {
                 )?;
             }
             tx.commit()?;
-            Ok(memory)
+            Ok(Saved { memory, superseded })
         })
         .await
     }
@@ -278,14 +313,15 @@ impl Store {
 
     /// Records what anchored files hashed to when the memory was saved. The
     /// first baseline wins, so a late post cannot make a stale memory look
-    /// fresh. False when the memory is not the caller's.
+    /// fresh. The number of anchors that got a baseline, or `None` when the
+    /// memory is not the caller's.
     pub async fn set_baselines(
         &self,
         p: &Principal,
         id: &str,
         commit: Option<String>,
         blobs: Vec<PathBlob>,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<usize>> {
         let (user_id, id) = (p.user_id, id.to_string());
         self.write(move |conn| {
             let tx = conn.transaction()?;
@@ -297,17 +333,68 @@ impl Store {
                 )
                 .optional()?
                 .is_some();
-            if owned {
-                for b in &blobs {
-                    tx.execute(
-                        "UPDATE memory_anchors SET blob_at_save = ?1, commit_at_save = ?2
+            if !owned {
+                return Ok(None);
+            }
+            let mut set = 0;
+            for b in &blobs {
+                set += tx.execute(
+                    "UPDATE memory_anchors SET blob_at_save = ?1, commit_at_save = ?2
                          WHERE memory_id = ?3 AND path = ?4 AND blob_at_save IS NULL",
-                        params![b.blob, commit, id, b.path],
-                    )?;
-                }
+                    params![b.blob, commit, id, b.path],
+                )?;
             }
             tx.commit()?;
-            Ok(owned)
+            Ok(Some(set))
+        })
+        .await
+    }
+
+    /// Counts for the metrics gauges, across all users. Read-only.
+    pub async fn stats(&self) -> anyhow::Result<Stats> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT scope,
+                        count(*) FILTER (WHERE deleted_at IS NULL AND superseded_by IS NULL),
+                        count(*) FILTER (WHERE deleted_at IS NULL AND superseded_by IS NOT NULL),
+                        count(*) FILTER (WHERE deleted_at IS NOT NULL)
+                 FROM memories GROUP BY scope ORDER BY scope",
+            )?;
+            let memories = stmt
+                .query_map([], |r| {
+                    let scope: String = r.get(0)?;
+                    Ok(MemoryCounts {
+                        scope: scope.parse().unwrap_or(Scope::Personal),
+                        active: r.get(1)?,
+                        superseded: r.get(2)?,
+                        deleted: r.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            let schema_version: u32 =
+                conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+            conn.query_row(
+                // anchors of superseded or deleted memories would count as missing forever
+                "SELECT (SELECT count(*) FILTER (WHERE a.blob_at_save IS NOT NULL)
+                         FROM memory_anchors a JOIN memories m ON m.id = a.memory_id
+                         WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL),
+                        (SELECT count(*) FILTER (WHERE a.blob_at_save IS NULL)
+                         FROM memory_anchors a JOIN memories m ON m.id = a.memory_id
+                         WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL),
+                        (SELECT count(*) FROM tokens WHERE revoked_at IS NULL),
+                        (SELECT count(*) FROM tokens WHERE revoked_at IS NOT NULL)",
+                [],
+                |r| {
+                    Ok(Stats {
+                        memories,
+                        anchors_with_baseline: r.get(0)?,
+                        anchors_missing_baseline: r.get(1)?,
+                        tokens_active: r.get(2)?,
+                        tokens_revoked: r.get(3)?,
+                        schema_version,
+                    })
+                },
+            )
         })
         .await
     }

@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # sm-server's --metrics-bind on the host (default 127.0.0.1:9477)
+  - job_name: sharedmem
+    static_configs:
+      - targets: ["host.docker.internal:9477"]

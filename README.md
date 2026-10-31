@@ -33,7 +33,7 @@ Logs go to stderr. By default you get startup, migrations, warnings and
 errors. Set `RUST_LOG` for more:
 
 ```sh
-RUST_LOG=sm_server=debug sm-server serve ...   # every request, auth refusal and tool call
+RUST_LOG=sm_server=debug sm-server serve ...   # every routed request, auth refusal and tool call
 RUST_LOG=sm_server=trace sm-server serve ...   # also recall query text and successful auth
 RUST_LOG=debug sm-server serve ...             # also rmcp and axum internals
 ```
@@ -68,6 +68,76 @@ control. Use one of these:
       reverse_proxy 127.0.0.1:8377
   }
   ```
+
+## Metrics
+
+`sm-server serve` also serves Prometheus metrics at `GET /metrics` on a
+second listener, `--metrics-bind`, default `127.0.0.1:9477`. It needs no
+token, so keep it on loopback. It is separate from `--bind`, so metrics never
+reach the tailnet by accident.
+
+`ops/` has a local Prometheus and Grafana:
+
+```sh
+docker compose -f ops/compose.yaml up -d   # with sm-server on the default --metrics-bind
+docker compose -f ops/compose.yaml down    # keeps the data volumes
+```
+
+- Prometheus: <http://127.0.0.1:9090>. It scrapes `host.docker.internal:9477`
+  every 15 s; Status → Targets shows whether the job is up.
+- Grafana: <http://127.0.0.1:3000/d/sharedmem>, user `admin`, password
+  `admin`.
+
+Both bind to loopback. Docker Desktop on macOS reaches the loopback-bound
+metrics port through `host.docker.internal`. Other engines may not; there,
+run Prometheus on the host instead.
+
+Labels and privacy:
+
+- Labels take bounded values only: the route template
+  (`/v1/memories/{id}/anchors`, never the id), method, status, tool, outcome,
+  scope, state and reason. Requests that match no route are not counted.
+- No metric carries an id, user, device, repo, path, query or memory text.
+- The database gauges (memories by scope and state, anchors with and without
+  a baseline, tokens, schema version, file size) are read at scrape time.
+
+### What is exported
+
+| Metric | Type | Labels and values | Meaning |
+|---|---|---|---|
+| `sharedmem_http_requests_total` | counter | `route` (template), `method` (GET, HEAD, POST, DELETE, other), `status` | Requests that matched a route. |
+| `sharedmem_http_request_duration_seconds` | histogram | `route`, `method` | Time to serve a routed request. |
+| `sharedmem_auth_failures_total` | counter | `reason`: missing_token, unknown_token, lookup_error | Requests refused by the bearer-token check. |
+| `sharedmem_tool_calls_total` | counter | `tool`: remember, recall, forget; `outcome`: ok, invalid, error | MCP tool calls. `invalid` is input the tool rejected (Claude sees why); `error` is a server fault. |
+| `sharedmem_tool_duration_seconds` | histogram | `tool` | Time per MCP tool call. |
+| `sharedmem_recall_results` | histogram | none | Memories returned by each successful `recall`, from 0 up to its limit. Counts matches, not relevant ones. |
+| `sharedmem_memories_saved_total` | counter | `scope`: personal, repo | Memories saved with `remember`. |
+| `sharedmem_memories_superseded_total` | counter | none | Saves whose `key` replaced an older memory. |
+| `sharedmem_anchor_baselines_total` | counter | `outcome`: set, unmatched, not_found, invalid, error | Anchor-baseline posts from the hook after `remember`. `unmatched` set no baseline: none of its paths was an anchor still without one. |
+| `sharedmem_context_memories` | histogram | none | Memories returned for a session start, before the hook trims them to its budget. |
+| `sharedmem_memories` | gauge | `scope`; `state`: active, superseded, deleted | Memories in the database. |
+| `sharedmem_anchors` | gauge | `baseline`: set, missing | Anchors of active memories with and without a recorded baseline. `missing` means the post-save hook never reported. |
+| `sharedmem_tokens` | gauge | `state`: active, revoked | Device tokens. |
+| `sharedmem_db_size_bytes` | gauge | none | Database file plus its WAL. |
+| `sharedmem_schema_version` | gauge | none | Applied migration (`PRAGMA user_version`). |
+| `sharedmem_build_info` | gauge | `version` | Always 1; the label is the running server version. |
+
+The same descriptions appear as `# HELP` lines in `/metrics`, and a test
+fails if this table and `crates/server/src/telemetry.rs` disagree. Gauges are
+read from the database at every scrape. Counters and histograms appear only
+after their first event, so until then their panels show "No data".
+
+Useful queries. Prometheus 3 stores bucket bounds as floats, so the
+empty-recall bucket is `le="0.0"`:
+
+```promql
+# share of recalls that found nothing
+rate(sharedmem_recall_results_bucket{le="0.0"}[1h]) / rate(sharedmem_recall_results_count[1h])
+# p95 latency by route
+histogram_quantile(0.95, sum by (route, le) (rate(sharedmem_http_request_duration_seconds_bucket[5m])))
+# tool calls that failed on the server
+sum by (tool) (rate(sharedmem_tool_calls_total{outcome="error"}[1h]))
+```
 
 ## Install the Claude Code plugin
 

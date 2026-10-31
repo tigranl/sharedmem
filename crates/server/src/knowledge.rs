@@ -4,7 +4,7 @@ use serde::Serialize;
 use sm_core::{Current, clean_anchor_path, resolve_scope, staleness};
 use sm_proto::{AnchorBaseline, Memory, Scope, Staleness};
 
-use crate::store::{NewMemory, Principal, Store};
+use crate::store::{NewMemory, Principal, Saved, Store};
 
 /// Why a request failed.
 #[derive(Debug)]
@@ -43,7 +43,7 @@ fn non_empty(s: Option<String>) -> Option<String> {
 }
 
 /// Validates and saves a memory.
-pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Memory, Error> {
+pub async fn remember(store: &Store, p: &Principal, r: Remember) -> Result<Saved, Error> {
     let text = r.text.trim().to_string();
     if text.is_empty() || text.len() > MAX_TEXT {
         return Err(invalid(format!("text must be 1..{MAX_TEXT} bytes")));
@@ -117,13 +117,14 @@ fn is_sha1_hex(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Anchor baselines posted by the hook right after `remember`.
+/// Anchor baselines posted by the hook right after `remember`. The number of
+/// anchors that got a baseline, or `None` when the memory is not the caller's.
 pub async fn set_baselines(
     store: &Store,
     p: &Principal,
     id: &str,
     b: AnchorBaseline,
-) -> Result<bool, Error> {
+) -> Result<Option<usize>, Error> {
     if b.blobs.iter().any(|pb| !is_sha1_hex(&pb.blob)) {
         return Err(invalid("blobs must be 40-char hex"));
     }

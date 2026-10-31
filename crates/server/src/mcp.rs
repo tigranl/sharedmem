@@ -4,6 +4,8 @@
 //! `http::request::Parts` into the tool call's `RequestContext::extensions`,
 //! and the auth layer put the `Principal` in those parts' extensions.
 
+use std::time::Instant;
+
 use axum::http::request::Parts;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -15,6 +17,7 @@ use tracing::{debug, error, trace};
 
 use crate::knowledge::{self, Error, Remember};
 use crate::store::{Principal, Store};
+use crate::telemetry;
 
 /// The MCP server: one per request, since sessions are stateless.
 #[derive(Clone)]
@@ -64,18 +67,31 @@ fn principal(ctx: &RequestContext<RoleServer>) -> Result<Principal, ErrorData> {
         .ok_or_else(|| ErrorData::internal_error("no authenticated principal", None))
 }
 
-fn result(tool: &'static str, r: Result<Value, Error>) -> Result<CallToolResult, ErrorData> {
-    match r {
-        Ok(v) => Ok(CallToolResult::structured(v)),
+/// The tool's reply; also records the call's outcome and time since `start`.
+fn result(
+    tool: &'static str,
+    start: Instant,
+    r: Result<Value, Error>,
+) -> Result<CallToolResult, ErrorData> {
+    let (outcome, reply) = match r {
+        Ok(v) => ("ok", Ok(CallToolResult::structured(v))),
         Err(Error::Invalid(msg)) => {
             debug!(tool, reason = %msg, "tool call rejected");
-            Ok(CallToolResult::error(vec![ContentBlock::text(msg)]))
+            (
+                "invalid",
+                Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+            )
         }
         Err(Error::Internal(e)) => {
             error!(tool, error = %format!("{e:#}"), "tool call failed");
-            Err(ErrorData::internal_error("storage error", None))
+            (
+                "error",
+                Err(ErrorData::internal_error("storage error", None)),
+            )
         }
-    }
+    };
+    telemetry::record_tool_call(tool, outcome, start.elapsed());
+    reply
 }
 
 #[tool_router]
@@ -94,6 +110,7 @@ impl Mcp {
         Parameters(a): Parameters<RememberArgs>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
+        let start = Instant::now();
         let p = principal(&ctx)?;
         // metadata only: the memory text stays out of logs
         debug!(
@@ -105,7 +122,7 @@ impl Mcp {
             None | Some("") => None,
             Some(s) => match s.parse() {
                 Ok(scope) => Some(scope),
-                Err(msg) => return result("remember", Err(Error::Invalid(msg))),
+                Err(msg) => return result("remember", start, Err(Error::Invalid(msg))),
             },
         };
         let r = Remember {
@@ -117,8 +134,14 @@ impl Mcp {
         };
         result(
             "remember",
-            knowledge::remember(&self.store, &p, r).await.map(|m| {
-                debug!(id = %m.id, scope = m.scope.as_str(), repo = ?m.repo, "remember saved");
+            start,
+            knowledge::remember(&self.store, &p, r).await.map(|saved| {
+                telemetry::record_memory_saved(&saved);
+                let m = saved.memory;
+                debug!(
+                    id = %m.id, scope = m.scope.as_str(), repo = ?m.repo,
+                    superseded = saved.superseded, "remember saved"
+                );
                 serde_json::json!(m)
             }),
         )
@@ -131,14 +154,17 @@ impl Mcp {
         Parameters(a): Parameters<RecallArgs>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
+        let start = Instant::now();
         let p = principal(&ctx)?;
         debug!(user = p.user_id, device = %p.device, repo = ?a.repo, limit = ?a.limit, "recall");
         trace!(query = %a.query, "recall query");
         let r = knowledge::recall(&self.store, &p, &a.query, a.repo.as_deref(), a.limit).await;
         result(
             "recall",
+            start,
             r.map(|memories| {
                 debug!(results = memories.len(), "recall results");
+                telemetry::record_recall_results(memories.len());
                 serde_json::json!({ "memories": memories })
             }),
         )
@@ -150,6 +176,7 @@ impl Mcp {
         Parameters(a): Parameters<ForgetArgs>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
+        let start = Instant::now();
         let p = principal(&ctx)?;
         debug!(user = p.user_id, device = %p.device, id = %a.id, "forget");
         let r = match knowledge::forget(&self.store, &p, &a.id).await {
@@ -160,7 +187,7 @@ impl Mcp {
             ))),
             Err(e) => Err(e),
         };
-        result("forget", r)
+        result("forget", start, r)
     }
 }
 
