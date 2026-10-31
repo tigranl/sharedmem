@@ -142,12 +142,13 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
     let nested = "/mcp/nested-tail-path";
     send(&app, get(Some(&token), nested)).await;
 
-    // a keyed memory, then its replacement with two anchors
+    // a keyed memory, then its replacement with two anchors; the superseded
+    // memory's anchor must not count in sharedmem_anchors
     let first = call(
         &app,
         &token,
         "remember",
-        json!({"text": "old fact", "repo": REPO, "key": "deploy"}),
+        json!({"text": "old fact", "repo": REPO, "key": "deploy", "anchors": ["ops/old.sh"]}),
     )
     .await;
     assert_eq!(first["isError"], false, "{first}");

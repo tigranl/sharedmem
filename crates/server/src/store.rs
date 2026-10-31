@@ -43,7 +43,7 @@ pub struct Saved {
 pub struct Stats {
     /// One entry per scope that has any memories.
     pub memories: Vec<MemoryCounts>,
-    /// Anchors whose baseline the PostToolUse hook has posted.
+    /// Anchors of active memories whose baseline the PostToolUse hook has posted.
     pub anchors_with_baseline: i64,
     pub anchors_missing_baseline: i64,
     pub tokens_active: i64,
@@ -371,8 +371,13 @@ impl Store {
             let schema_version: u32 =
                 conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
             conn.query_row(
-                "SELECT (SELECT count(*) FROM memory_anchors WHERE blob_at_save IS NOT NULL),
-                        (SELECT count(*) FROM memory_anchors WHERE blob_at_save IS NULL),
+                // anchors of superseded or deleted memories would count as missing forever
+                "SELECT (SELECT count(*) FILTER (WHERE a.blob_at_save IS NOT NULL)
+                         FROM memory_anchors a JOIN memories m ON m.id = a.memory_id
+                         WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL),
+                        (SELECT count(*) FILTER (WHERE a.blob_at_save IS NULL)
+                         FROM memory_anchors a JOIN memories m ON m.id = a.memory_id
+                         WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL),
                         (SELECT count(*) FROM tokens WHERE revoked_at IS NULL),
                         (SELECT count(*) FROM tokens WHERE revoked_at IS NOT NULL)",
                 [],

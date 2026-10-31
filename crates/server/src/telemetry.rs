@@ -113,7 +113,7 @@ const DOCS: [Doc; 16] = [
     Doc {
         name: ANCHORS,
         kind: Kind::Gauge,
-        help: "Anchors with and without a recorded baseline; missing means the post-save hook never reported.",
+        help: "Anchors of active memories with and without a recorded baseline; missing means the post-save hook never reported.",
     },
     Doc {
         name: TOKENS,

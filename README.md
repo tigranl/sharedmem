@@ -116,7 +116,7 @@ Labels and privacy:
 | `sharedmem_anchor_baselines_total` | counter | `outcome`: set, not_found, invalid, error | Anchor-baseline posts from the hook after `remember`. |
 | `sharedmem_context_memories` | histogram | none | Memories returned for a session start, before the hook trims them to its budget. |
 | `sharedmem_memories` | gauge | `scope`; `state`: active, superseded, deleted | Memories in the database. |
-| `sharedmem_anchors` | gauge | `baseline`: set, missing | Anchors with and without a recorded baseline. `missing` means the post-save hook never reported. |
+| `sharedmem_anchors` | gauge | `baseline`: set, missing | Anchors of active memories with and without a recorded baseline. `missing` means the post-save hook never reported. |
 | `sharedmem_tokens` | gauge | `state`: active, revoked | Device tokens. |
 | `sharedmem_db_size_bytes` | gauge | none | Database file plus its WAL. |
 | `sharedmem_schema_version` | gauge | none | Applied migration (`PRAGMA user_version`). |
