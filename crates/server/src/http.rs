@@ -77,12 +77,18 @@ async fn anchors(
 ) -> StatusCode {
     let (paths, commit) = (body.blobs.len(), body.commit.clone());
     match knowledge::set_baselines(&store, &p, &id, body).await {
-        Ok(true) => {
-            debug!(user = p.user_id, %id, paths, ?commit, "anchor baselines set");
+        // the hook drops anchors it can't read, so a post can match none
+        Ok(Some(0)) => {
+            debug!(user = p.user_id, %id, paths, "anchor baselines: no anchor without one matched");
+            telemetry::record_anchor_baselines("unmatched");
+            StatusCode::NO_CONTENT
+        }
+        Ok(Some(set)) => {
+            debug!(user = p.user_id, %id, paths, set, ?commit, "anchor baselines set");
             telemetry::record_anchor_baselines("set");
             StatusCode::NO_CONTENT
         }
-        Ok(false) => {
+        Ok(None) => {
             debug!(user = p.user_id, %id, "anchor baselines: no such memory of this user");
             telemetry::record_anchor_baselines("not_found");
             StatusCode::NOT_FOUND

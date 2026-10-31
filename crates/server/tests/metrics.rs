@@ -171,10 +171,13 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
     let baseline = json!({"commit": "0123abcd", "blobs": [
         {"path": "ops/deploy.sh", "blob": "ce013625030ba8dba906f756967f9e9ca394464a"}]});
     let uri = format!("/v1/memories/{id}/anchors");
-    assert_eq!(
-        send(&app, post(&token, &uri, &baseline)).await.0,
-        StatusCode::NO_CONTENT
-    );
+    // the second post sets nothing: the first baseline wins
+    for _ in 0..2 {
+        assert_eq!(
+            send(&app, post(&token, &uri, &baseline)).await.0,
+            StatusCode::NO_CONTENT
+        );
+    }
 
     let none = call(&app, &token, "recall", json!({"query": QUERY})).await;
     assert_eq!(none["structuredContent"]["memories"], json!([]), "{none}");
@@ -227,13 +230,13 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
             r#"method="POST""#,
             r#"status="204""#,
         ],
-        1.0,
+        2.0,
     );
     assert_value(
         &text,
         "sharedmem_http_request_duration_seconds_count",
         &[r#"route="/v1/memories/{id}/anchors""#],
-        1.0,
+        2.0,
     );
     for raw in [unmatched, nested, "__private__"] {
         assert!(!text.contains(raw), "{raw:?} became a route label:\n{text}");
@@ -301,6 +304,12 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
         &text,
         "sharedmem_anchor_baselines_total",
         &[r#"outcome="set""#],
+        1.0,
+    );
+    assert_value(
+        &text,
+        "sharedmem_anchor_baselines_total",
+        &[r#"outcome="unmatched""#],
         1.0,
     );
 

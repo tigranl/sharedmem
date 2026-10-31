@@ -287,7 +287,8 @@ pub fn record_memory_saved(saved: &Saved) {
     }
 }
 
-/// One anchor-baseline post: `outcome` is `set`, `not_found`, `invalid` or `error`.
+/// One anchor-baseline post: `outcome` is `set`, `unmatched` (no anchor got a
+/// baseline), `not_found`, `invalid` or `error`.
 pub fn record_anchor_baselines(outcome: &'static str) {
     counter!(ANCHOR_BASELINES, "outcome" => outcome).increment(1);
 }

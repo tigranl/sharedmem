@@ -313,14 +313,15 @@ impl Store {
 
     /// Records what anchored files hashed to when the memory was saved. The
     /// first baseline wins, so a late post cannot make a stale memory look
-    /// fresh. False when the memory is not the caller's.
+    /// fresh. The number of anchors that got a baseline, or `None` when the
+    /// memory is not the caller's.
     pub async fn set_baselines(
         &self,
         p: &Principal,
         id: &str,
         commit: Option<String>,
         blobs: Vec<PathBlob>,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<usize>> {
         let (user_id, id) = (p.user_id, id.to_string());
         self.write(move |conn| {
             let tx = conn.transaction()?;
@@ -332,17 +333,19 @@ impl Store {
                 )
                 .optional()?
                 .is_some();
-            if owned {
-                for b in &blobs {
-                    tx.execute(
-                        "UPDATE memory_anchors SET blob_at_save = ?1, commit_at_save = ?2
+            if !owned {
+                return Ok(None);
+            }
+            let mut set = 0;
+            for b in &blobs {
+                set += tx.execute(
+                    "UPDATE memory_anchors SET blob_at_save = ?1, commit_at_save = ?2
                          WHERE memory_id = ?3 AND path = ?4 AND blob_at_save IS NULL",
-                        params![b.blob, commit, id, b.path],
-                    )?;
-                }
+                    params![b.blob, commit, id, b.path],
+                )?;
             }
             tx.commit()?;
-            Ok(owned)
+            Ok(Some(set))
         })
         .await
     }

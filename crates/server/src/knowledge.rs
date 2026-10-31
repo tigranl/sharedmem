@@ -117,13 +117,14 @@ fn is_sha1_hex(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Anchor baselines posted by the hook right after `remember`.
+/// Anchor baselines posted by the hook right after `remember`. The number of
+/// anchors that got a baseline, or `None` when the memory is not the caller's.
 pub async fn set_baselines(
     store: &Store,
     p: &Principal,
     id: &str,
     b: AnchorBaseline,
-) -> Result<bool, Error> {
+) -> Result<Option<usize>, Error> {
     if b.blobs.iter().any(|pb| !is_sha1_hex(&pb.blob)) {
         return Err(invalid("blobs must be 40-char hex"));
     }

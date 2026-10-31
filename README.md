@@ -113,7 +113,7 @@ Labels and privacy:
 | `sharedmem_recall_results` | histogram | none | Memories returned by each successful `recall`, from 0 up to its limit. Counts matches, not relevant ones. |
 | `sharedmem_memories_saved_total` | counter | `scope`: personal, repo | Memories saved with `remember`. |
 | `sharedmem_memories_superseded_total` | counter | none | Saves whose `key` replaced an older memory. |
-| `sharedmem_anchor_baselines_total` | counter | `outcome`: set, not_found, invalid, error | Anchor-baseline posts from the hook after `remember`. |
+| `sharedmem_anchor_baselines_total` | counter | `outcome`: set, unmatched, not_found, invalid, error | Anchor-baseline posts from the hook after `remember`. `unmatched` set no baseline: none of its paths was an anchor still without one. |
 | `sharedmem_context_memories` | histogram | none | Memories returned for a session start, before the hook trims them to its budget. |
 | `sharedmem_memories` | gauge | `scope`; `state`: active, superseded, deleted | Memories in the database. |
 | `sharedmem_anchors` | gauge | `baseline`: set, missing | Anchors of active memories with and without a recorded baseline. `missing` means the post-save hook never reported. |
