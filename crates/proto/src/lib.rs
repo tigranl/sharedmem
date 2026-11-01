@@ -91,3 +91,99 @@ pub struct PathBlob {
     pub path: String,
     pub blob: String,
 }
+
+/// A hook event whose runs `sm-hook` reports (D13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookEvent {
+    SessionStart,
+    Remembered,
+    /// A name this server doesn't know, from a newer hook. Counted, never a new label.
+    #[serde(other)]
+    Other,
+}
+
+impl HookEvent {
+    /// The snake_case name used on the wire and as a metric label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HookEvent::SessionStart => "session_start",
+            HookEvent::Remembered => "remembered",
+            HookEvent::Other => "other",
+        }
+    }
+}
+
+/// How a hook run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookOutcome {
+    Ok,
+    /// The server could not be reached, or did not answer in time.
+    Unreachable,
+    /// The server answered with an error status.
+    ServerError,
+    /// The run hit its watchdog; a session start injected nothing.
+    Timeout,
+    /// Anything else, such as bad hook input or a memory saved for another repo.
+    Error,
+    /// A name this server doesn't know, from a newer hook.
+    #[serde(other)]
+    Other,
+}
+
+impl HookOutcome {
+    /// The snake_case name used on the wire and as a metric label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HookOutcome::Ok => "ok",
+            HookOutcome::Unreachable => "unreachable",
+            HookOutcome::ServerError => "server_error",
+            HookOutcome::Timeout => "timeout",
+            HookOutcome::Error => "error",
+            HookOutcome::Other => "other",
+        }
+    }
+}
+
+/// Anchors a session start checked against the files on disk, by result.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnchorChecks {
+    pub fresh: u32,
+    pub changed: u32,
+    pub deleted: u32,
+    pub unknown: u32,
+}
+
+impl AnchorChecks {
+    /// Counts one check.
+    pub fn add(&mut self, s: Staleness) {
+        let n = match s {
+            Staleness::Fresh => &mut self.fresh,
+            Staleness::Changed => &mut self.changed,
+            Staleness::Deleted => &mut self.deleted,
+            Staleness::Unknown => &mut self.unknown,
+        };
+        *n += 1;
+    }
+}
+
+/// One `sm-hook` run, reported after the fact so the server can count it (D13).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookRun {
+    pub event: HookEvent,
+    pub outcome: HookOutcome,
+    pub duration_ms: u64,
+    /// Memories in the injected block, after trimming to the budget. Session start only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injected: Option<u32>,
+    /// Session start only; zero otherwise.
+    #[serde(default)]
+    pub anchors: AnchorChecks,
+}
+
+/// Body of `POST /v1/hook-runs`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookRuns {
+    pub runs: Vec<HookRun>,
+}

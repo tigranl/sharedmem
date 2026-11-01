@@ -19,6 +19,8 @@ use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gau
 use metrics_exporter_prometheus::{BuildError, Matcher, PrometheusBuilder, PrometheusHandle};
 use tracing::error;
 
+use sm_proto::HookRun;
+
 use crate::store::{Saved, Stats, Store};
 
 const HTTP_REQUESTS: &str = "sharedmem_http_requests_total";
@@ -37,6 +39,10 @@ const TOKENS: &str = "sharedmem_tokens";
 const DB_SIZE: &str = "sharedmem_db_size_bytes";
 const SCHEMA_VERSION: &str = "sharedmem_schema_version";
 const BUILD_INFO: &str = "sharedmem_build_info";
+const HOOK_RUNS: &str = "sharedmem_hook_runs_total";
+const HOOK_DURATION: &str = "sharedmem_hook_duration_seconds";
+const HOOK_ANCHOR_CHECKS: &str = "sharedmem_hook_anchor_checks_total";
+const HOOK_INJECTED: &str = "sharedmem_hook_injected_memories";
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -54,7 +60,7 @@ struct Doc {
 
 /// Every metric. [`install`] registers these as `# HELP` lines, and a test
 /// checks that the README's metrics table lists exactly these names.
-const DOCS: [Doc; 16] = [
+const DOCS: [Doc; 20] = [
     Doc {
         name: HTTP_REQUESTS,
         kind: Kind::Counter,
@@ -135,6 +141,26 @@ const DOCS: [Doc; 16] = [
         kind: Kind::Gauge,
         help: "Always 1; the version label is the running sm-server version.",
     },
+    Doc {
+        name: HOOK_RUNS,
+        kind: Kind::Counter,
+        help: "sm-hook runs by event and outcome, counted when the hook's report arrives.",
+    },
+    Doc {
+        name: HOOK_DURATION,
+        kind: Kind::Histogram,
+        help: "Time per sm-hook run, measured by the hook.",
+    },
+    Doc {
+        name: HOOK_ANCHOR_CHECKS,
+        kind: Kind::Counter,
+        help: "Anchors checked against the files on disk at session start, by result.",
+    },
+    Doc {
+        name: HOOK_INJECTED,
+        kind: Kind::Histogram,
+        help: "Memories in the block a session start injected, after trimming to its budget.",
+    },
 ];
 
 /// Seconds, 1 ms to 2.5 s.
@@ -151,11 +177,11 @@ const UPKEEP_EVERY: Duration = Duration::from_secs(5);
 pub fn install() -> Result<PrometheusHandle, BuildError> {
     // without explicit buckets the exporter renders summaries, which have no `le` buckets
     let mut builder = PrometheusBuilder::new();
-    for name in [HTTP_REQUEST_DURATION, TOOL_DURATION] {
+    for name in [HTTP_REQUEST_DURATION, TOOL_DURATION, HOOK_DURATION] {
         builder =
             builder.set_buckets_for_metric(Matcher::Full(name.to_owned()), &LATENCY_BUCKETS)?;
     }
-    for name in [RECALL_RESULTS, CONTEXT_MEMORIES] {
+    for name in [RECALL_RESULTS, CONTEXT_MEMORIES, HOOK_INJECTED] {
         builder = builder.set_buckets_for_metric(Matcher::Full(name.to_owned()), &COUNT_BUCKETS)?;
     }
     let handle = builder.install_recorder()?;
@@ -291,6 +317,28 @@ pub fn record_memory_saved(saved: &Saved) {
 /// baseline), `not_found`, `invalid` or `error`.
 pub fn record_anchor_baselines(outcome: &'static str) {
     counter!(ANCHOR_BASELINES, "outcome" => outcome).increment(1);
+}
+
+/// One `sm-hook` run from `POST /v1/hook-runs`. Recorded when the report
+/// arrives, which can be long after the run if the server was unreachable.
+pub fn record_hook_run(run: &HookRun) {
+    let event = run.event.as_str();
+    counter!(HOOK_RUNS, "event" => event, "outcome" => run.outcome.as_str()).increment(1);
+    histogram!(HOOK_DURATION, "event" => event).record(Duration::from_millis(run.duration_ms));
+    if let Some(n) = run.injected {
+        histogram!(HOOK_INJECTED).record(f64::from(n));
+    }
+    let a = &run.anchors;
+    for (state, n) in [
+        ("fresh", a.fresh),
+        ("changed", a.changed),
+        ("deleted", a.deleted),
+        ("unknown", a.unknown),
+    ] {
+        if n > 0 {
+            counter!(HOOK_ANCHOR_CHECKS, "state" => state).increment(u64::from(n));
+        }
+    }
 }
 
 /// How many memories `GET /v1/context` returned, before the hook truncates them.
