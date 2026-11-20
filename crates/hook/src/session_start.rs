@@ -6,17 +6,23 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 use sm_core::{Current, clean_anchor_path, content_hash, staleness};
-use sm_proto::{Anchor, Memory, Staleness};
+use sm_proto::{Anchor, AnchorChecks, Memory, Staleness};
 
-use crate::{Result, api::Api, git};
+use crate::{Ran, Result, api::Api, git};
 
 /// About 1,500 tokens.
 const MAX_CHARS: usize = 6_000;
 /// One long memory must not crowd out the rest.
 const MAX_MEMORY_CHARS: usize = 600;
 
-/// Returns the hook output JSON carrying the context block.
-pub fn run(input: &Value, api: &Api) -> Result<String> {
+/// The context block, and how many memories fit in it.
+struct Block {
+    text: String,
+    shown: usize,
+}
+
+/// Returns the hook output JSON carrying the context block, and the counts its report carries.
+pub fn run(input: &Value, api: &Api) -> Result<Ran> {
     let cwd = input["cwd"].as_str().ok_or("no cwd in hook input")?;
     let top = git::toplevel(Path::new(cwd));
     let repo = top.as_deref().and_then(git::repo_id);
@@ -34,11 +40,20 @@ pub fn run(input: &Value, api: &Api) -> Result<String> {
             (m, m.anchors.iter().map(|a| check(here, a)).collect())
         })
         .collect();
+    let mut anchors = AnchorChecks::default();
+    for s in checked.iter().flat_map(|(_, flags)| flags) {
+        anchors.add(*s);
+    }
     let block = render(repo.as_deref(), branch.as_deref(), &checked);
-    Ok(json!({
-        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": block}
+    let output = json!({
+        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": block.text}
     })
-    .to_string())
+    .to_string();
+    Ok(Ran {
+        output: Some(output),
+        injected: Some(u32::try_from(block.shown).unwrap_or(u32::MAX)),
+        anchors,
+    })
 }
 
 fn check(top: Option<&Path>, anchor: &Anchor) -> Staleness {
@@ -87,7 +102,7 @@ fn render(
     repo: Option<&str>,
     branch: Option<&str>,
     memories: &[(&Memory, Vec<Staleness>)],
-) -> String {
+) -> Block {
     let header = match (repo, branch) {
         (Some(r), Some(b)) => format!("## sharedmem · {r} @ {b}"),
         (Some(r), None) => format!("## sharedmem · {r}"),
@@ -102,6 +117,7 @@ fn render(
     // room for the footer and a "more" line
     let budget = MAX_CHARS.saturating_sub(footer.len() + 80);
     let mut out = header;
+    let mut shown = 0;
     for (i, (m, flags)) in memories.iter().enumerate() {
         let line = line(m, flags);
         if out.len() + 1 + line.len() > budget {
@@ -113,10 +129,11 @@ fn render(
         }
         out.push('\n');
         out.push_str(&line);
+        shown += 1;
     }
     out.push('\n');
     out.push_str(&footer);
-    out
+    Block { text: out, shown }
 }
 
 #[cfg(test)]
@@ -161,8 +178,9 @@ mod tests {
                 (&c, vec![]),
             ],
         );
+        assert_eq!(block.shown, 3, "every memory fits");
         assert_eq!(
-            block,
+            block.text,
             "## sharedmem · github.com/tigran/osshunt @ main\n\
              - [repo] Fix companies.yaml first. (companies.yaml: fresh)\n\
              - [repo] Token lifts limits. (fetch/github.py: CHANGED since saved, verify)\n\
@@ -179,7 +197,12 @@ mod tests {
             .map(|_| memory(Scope::Personal, &long, &[]))
             .collect();
         let checked: Vec<_> = ms.iter().map(|m| (m, vec![])).collect();
-        let block = render(None, None, &checked);
+        let Block { text: block, shown } = render(None, None, &checked);
+        assert!(
+            shown > 0 && shown < ms.len(),
+            "{shown} of {} memories shown",
+            ms.len()
+        );
         assert!(
             block.chars().count() <= MAX_CHARS,
             "{} chars over budget",

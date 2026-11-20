@@ -553,6 +553,148 @@
       "options": {
         "textMode": "name"
       }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Hook runs by event and outcome",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (event, outcome) (rate(sharedmem_hook_runs_total[$__rate_interval]))",
+          "legendFormat": "{{event}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Counted when the hook's report arrives; runs made while the server was unreachable arrive late."
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "p95 hook duration by event",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 40,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (event, le) (rate(sharedmem_hook_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Session start gives up at 0.5 s and injects nothing."
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Anchor checks at session start",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (state) (rate(sharedmem_hook_anchor_checks_total[$__rate_interval]))",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Memories returned vs injected",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 40,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(sharedmem_context_memories_sum[$__rate_interval])) / sum(rate(sharedmem_context_memories_count[$__rate_interval]))",
+          "legendFormat": "returned (avg)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(sharedmem_hook_injected_memories_sum[$__rate_interval])) / sum(rate(sharedmem_hook_injected_memories_count[$__rate_interval]))",
+          "legendFormat": "injected (avg)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "description": "Returned by /v1/context, and what fit in the block after trimming."
     }
   ]
 }

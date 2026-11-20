@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router, middleware};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use sm_proto::AnchorBaseline;
+use sm_proto::{AnchorBaseline, HookRuns};
 use tracing::{debug, error, warn};
 
 use crate::knowledge::{self, Error};
@@ -35,6 +35,7 @@ pub fn router(store: Store) -> Router {
     let protected = Router::new()
         .route("/v1/context", get(context::get))
         .route("/v1/memories/{id}/anchors", post(anchors))
+        .route("/v1/hook-runs", post(hook_runs))
         .nest_service("/mcp", mcp)
         .layer(middleware::from_fn_with_state(
             store.clone(),
@@ -67,6 +68,21 @@ async fn log_request(req: Request, next: Next) -> Response {
         debug!(%method, %path, status, ms, "request");
     }
     res
+}
+
+/// Most runs one `POST /v1/hook-runs` may carry; the hook sends at most 500.
+const MAX_HOOK_RUNS: usize = 1_000;
+
+/// The hook's reports of its own runs. They only feed metrics; nothing is stored.
+async fn hook_runs(Json(body): Json<HookRuns>) -> StatusCode {
+    if body.runs.len() > MAX_HOOK_RUNS {
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    }
+    for run in &body.runs {
+        telemetry::record_hook_run(run);
+    }
+    debug!(runs = body.runs.len(), "hook runs reported");
+    StatusCode::NO_CONTENT
 }
 
 async fn anchors(

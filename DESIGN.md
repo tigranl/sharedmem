@@ -468,9 +468,13 @@ Each slice is usable on its own.
     or memory text.
   - The database gauges are read at scrape time. Nothing about metrics is
     stored in the database.
-  - The short-lived `sm-hook` cannot be scraped. It will report each run to
-    the server, which turns the report into metrics, so every metric is on
-    one endpoint. Not built yet.
+  - The short-lived `sm-hook` cannot be scraped, so it reports each run:
+    event, outcome, duration, and at session start the anchor checks and the
+    memories injected. A run appends its report to a spool file and starts a
+    detached `sm-hook flush`, so no run waits on the network for it. The flush
+    posts to `POST /v1/hook-runs` and the server turns the reports into
+    metrics, so every metric is on one endpoint. Reports count on arrival;
+    runs that could not reach the server arrive with the next flush.
 
 ## 16. Open questions
 

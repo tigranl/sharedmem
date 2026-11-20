@@ -193,6 +193,24 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
     let (status, _) = send(&app, get(Some(&token), &format!("/v1/context?repo={REPO}"))).await;
     assert_eq!(status, StatusCode::OK);
 
+    // hook reports: one session start, and one from a newer hook whose names
+    // this server doesn't know, which must not become label values
+    let runs = json!({"runs": [
+        {"event": "session_start", "outcome": "ok", "duration_ms": 40, "injected": 3,
+         "anchors": {"fresh": 2, "changed": 1, "deleted": 0, "unknown": 0}},
+        {"event": "post_compact", "outcome": "rate_limited", "duration_ms": 5},
+    ]});
+    assert_eq!(
+        send(&app, post(&token, "/v1/hook-runs", &runs)).await.0,
+        StatusCode::NO_CONTENT
+    );
+    let one = json!({"event": "remembered", "outcome": "ok", "duration_ms": 1});
+    let too_many = json!({"runs": vec![one; 1_001]});
+    assert_eq!(
+        send(&app, post(&token, "/v1/hook-runs", &too_many)).await.0,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+
     let (status, text) = send(&metrics, get(None, "/metrics")).await;
     assert_eq!(status, StatusCode::OK);
 
@@ -357,6 +375,40 @@ async fn metrics_reflect_requests_and_db_with_bounded_labels() {
     assert!(size > 0.0, "db size {size}");
     let version = format!(r#"version="{}""#, env!("CARGO_PKG_VERSION"));
     assert_value(&text, "sharedmem_build_info", &[&version], 1.0);
+
+    // hook runs, from the reports
+    let hook_runs = "sharedmem_hook_runs_total";
+    assert_value(
+        &text,
+        hook_runs,
+        &[r#"event="session_start""#, r#"outcome="ok""#],
+        1.0,
+    );
+    assert_value(
+        &text,
+        hook_runs,
+        &[r#"event="other""#, r#"outcome="other""#],
+        1.0,
+    );
+    for raw in ["post_compact", "rate_limited", r#"event="remembered""#] {
+        assert!(!text.contains(raw), "{raw:?} reached /metrics:\n{text}");
+    }
+    assert_value(
+        &text,
+        "sharedmem_hook_duration_seconds_count",
+        &[r#"event="session_start""#],
+        1.0,
+    );
+    let checks = "sharedmem_hook_anchor_checks_total";
+    assert_value(&text, checks, &[r#"state="fresh""#], 2.0);
+    assert_value(&text, checks, &[r#"state="changed""#], 1.0);
+    assert_eq!(
+        value(&text, checks, &[r#"state="deleted""#]),
+        None,
+        "zero counts must not create series"
+    );
+    assert_value(&text, "sharedmem_hook_injected_memories_count", &[], 1.0);
+    assert_value(&text, "sharedmem_hook_injected_memories_sum", &[], 3.0);
 
     // every exported metric carries its description
     for line in text.lines() {

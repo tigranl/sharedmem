@@ -121,6 +121,18 @@ Labels and privacy:
 | `sharedmem_db_size_bytes` | gauge | none | Database file plus its WAL. |
 | `sharedmem_schema_version` | gauge | none | Applied migration (`PRAGMA user_version`). |
 | `sharedmem_build_info` | gauge | `version` | Always 1; the label is the running server version. |
+| `sharedmem_hook_runs_total` | counter | `event`: session_start, remembered, other; `outcome`: ok, unreachable, server_error, timeout, error, other | `sm-hook` runs. `timeout` means the watchdog fired; at session start nothing was injected. |
+| `sharedmem_hook_duration_seconds` | histogram | `event` | Time per hook run, measured by the hook. Session start gives up at 0.5 s. |
+| `sharedmem_hook_anchor_checks_total` | counter | `state`: fresh, changed, deleted, unknown | Anchors a session start checked against the files on disk. |
+| `sharedmem_hook_injected_memories` | histogram | none | Memories in the injected block, after trimming. Compare with `sharedmem_context_memories`. |
+
+Hook metrics come from `sm-hook`, which runs too briefly to be scraped. Each
+run appends a report to `~/.local/state/sharedmem/runs.jsonl` and starts a
+detached `sm-hook flush`, so no run waits for its report. The flush posts the
+reports to `POST /v1/hook-runs`, and the server counts them. A report counts
+when it arrives: runs that could not reach the server are counted on the next
+successful flush, so their rate shows up late. The spool stops growing at
+256 KiB.
 
 The same descriptions appear as `# HELP` lines in `/metrics`, and a test
 fails if this table and `crates/server/src/telemetry.rs` disagree. Gauges are
