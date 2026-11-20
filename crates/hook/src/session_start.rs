@@ -74,7 +74,7 @@ fn label(s: Staleness) -> &'static str {
     match s {
         Staleness::Fresh => "fresh",
         Staleness::Changed => "CHANGED since saved, verify",
-        Staleness::Deleted => "DELETED since saved, verify",
+        Staleness::Deleted => "not in your checkout, verify",
         Staleness::Unknown => "unverified",
     }
 }
