@@ -41,6 +41,8 @@ impl FromStr for Scope {
 pub enum Staleness {
     Fresh,
     Changed,
+    /// The file is absent from the reader's checkout. It may have been deleted, or it may be new in
+    /// the writer's branch.
     Deleted,
     /// No baseline, or the file could not be checked.
     Unknown,
